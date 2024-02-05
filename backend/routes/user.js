@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const { User, Account } = require("../db");
 const { JWT_SECRET } = require("../config");
 const { authMiddleware } = require("../middleware");
+const bcrypt = require("bcrypt");
 
 const signupSchema = z.object({
   username: z.string().email().min(3).max(30),
@@ -44,9 +45,11 @@ userRouter.post("/signup", async (req, res) => {
     });
   }
 
+  const passwordHash = await bcrypt.hash(body.password, 10);
+
   const createdUser = await User.create({
     username: body.username,
-    password: body.password,
+    password: passwordHash,
     firstName: body.firstName,
     lastName: body.lastName,
   });
@@ -75,14 +78,13 @@ userRouter.post("/signup", async (req, res) => {
   res.status(200).json({
     ok: true,
     message: "User created successfully",
+    passwordHash: passwordHash,
   });
 });
 
 userRouter.post("/signin", async (req, res) => {
   const body = req.body;
   const success = signinSchema.safeParse(req.body).success;
-
-  console.log(body);
 
   if (!success) {
     res.status(411).json({
@@ -92,31 +94,37 @@ userRouter.post("/signin", async (req, res) => {
 
   const userFound = await User.findOne({
     username: body.username,
-    password: body.password,
   });
 
   if (userFound) {
-    const userId = userFound._id;
+    if (await bcrypt.compare(body.password, userFound.password)) {
+      const userId = userFound._id;
 
-    const token = jwt.sign(
-      {
-        userId,
-      },
-      JWT_SECRET
-    );
+      const token = jwt.sign(
+        {
+          userId,
+        },
+        JWT_SECRET
+      );
 
-    res.cookie("sample-paytms-cookie", token, {
-      maxAge: 60 * 60 * 1000,
-      httpOnly: true,
-      domain: "localhost",
-      path: "/",
-      secure: true,
-      sameSite: "None",
-    });
-    return res.status(200).json({
-      ok: true,
-      message: "Successfully logged in.",
-    });
+      res.cookie("sample-paytms-cookie", token, {
+        maxAge: 60 * 60 * 1000,
+        httpOnly: true,
+        domain: "localhost",
+        path: "/",
+        secure: true,
+        sameSite: "None",
+      });
+      return res.status(200).json({
+        ok: true,
+        message: "Successfully logged in.",
+      });
+    } else {
+      return res.status(411).json({
+        ok: false,
+        message: "Incorrect Password",
+      });
+    }
   }
 
   res.status(411).json({
